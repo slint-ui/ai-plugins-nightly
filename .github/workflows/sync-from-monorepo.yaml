@@ -1,0 +1,90 @@
+name: Sync from monorepo
+
+# Publishes the nightly Slint plugin from the master branch of the
+# slint-ui/slint monorepo into this repo. slint-ui/ai-plugins publishes the
+# released plugin the same way, from release/1.
+#
+# Compared to the released plugin, the sync:
+# - sets the Slint preview to the snapshot WebAssembly interpreter,
+# - renames the marketplace to `slint-nightly`, so that it can be added next
+#   to the released one,
+# - adds a `-nightly.<UTC timestamp>` suffix to the version, so that clients
+#   see each change as an update.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-from-monorepo
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v7
+
+      - name: Fetch the plugin from the monorepo
+        run: |
+          set -euo pipefail
+          # Clone outside the workspace so the checkout never lands in the
+          # published tree (and is not seen by the rsync --delete below).
+          git clone --depth 1 --filter=blob:none --sparse --branch master \
+            https://github.com/slint-ui/slint.git "$RUNNER_TEMP/monorepo"
+          # The plugin's icons are symlinks into logo/.
+          git -C "$RUNNER_TEMP/monorepo" sparse-checkout set ai-plugins logo
+          echo "SLINT_SHA=$(git -C "$RUNNER_TEMP/monorepo" rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Sync the plugin
+        run: |
+          set -euo pipefail
+          # Mirror the monorepo's ai-plugins/ onto this repo's root; README and
+          # .github are owned here and are preserved. Symlinks out of
+          # ai-plugins/ become copies.
+          rsync -a --copy-unsafe-links --delete \
+            --exclude='.git' --exclude='.github' --exclude='README.md' \
+            "$RUNNER_TEMP/monorepo/ai-plugins/" ./
+          printf '{ "channel": "snapshot" }\n' > mcp/slint-preview/channel.json
+          for marketplace in .claude-plugin/marketplace.json .cursor-plugin/marketplace.json; do
+            sed -i 's/^  "name": "slint",$/  "name": "slint-nightly",/' "$marketplace"
+            grep -q '^  "name": "slint-nightly",$' "$marketplace"
+          done
+
+      - name: Add the nightly version suffix
+        run: |
+          set -euo pipefail
+          manifests=$(find . -path ./.git -prune -o \
+            \( -name plugin.json -o -name marketplace.json \) -print)
+          set_version() {
+            echo "$manifests" | xargs sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$1\"/"
+          }
+          version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' .claude-plugin/plugin.json)
+          previous=$(git show HEAD:.claude-plugin/plugin.json 2>/dev/null \
+            | sed -n 's/.*"version": "[^"]*-nightly\.\([0-9]*\)".*/\1/p' || true)
+          # Reuse the previous timestamp first, so that only a change in
+          # content or in the monorepo's version publishes a new nightly.
+          if [ -n "$previous" ]; then
+            set_version "$version-nightly.$previous"
+            git add -A
+            git diff --cached --quiet && exit 0
+          fi
+          set_version "$version-nightly.$(date -u +%Y%m%d%H%M)"
+
+      - name: Commit and push if changed
+        run: |
+          set -euo pipefail
+          git config user.name "slint-sync-bot"
+          git config user.email "noreply@slint.dev"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already up to date."
+          else
+            git commit -m "Sync from slint-ui/slint@${SLINT_SHA}"
+            git push
+          fi
