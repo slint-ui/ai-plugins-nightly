@@ -1,6 +1,6 @@
 {
   "name": "slint",
-  "version": "1.19.0-nightly.202610270508",
+  "version": "1.19.0-nightly.202610280506",
   "description": "Enhances Claude's ability to work with, debug, and build Slint GUI applications",
   "author": {
     "name": "Slint",
