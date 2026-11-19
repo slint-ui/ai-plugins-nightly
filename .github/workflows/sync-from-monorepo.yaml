@@ -83,6 +83,8 @@ jobs:
           rsync -a --copy-unsafe-links --delete \
             --exclude='.git' --exclude='.github' --exclude='README.md' \
             "$RUNNER_TEMP/monorepo/ai-plugins/" ./
+          mkdir -p mcp/guidance
+          rsync -a --exclude='SKILL.md' skills/slint/ mcp/guidance/
           printf '{ "channel": "snapshot" }\n' > mcp/slint-preview/channel.json
           for marketplace in .claude-plugin/marketplace.json .cursor-plugin/marketplace.json; do
             sed -i 's/^  "name": "slint",$/  "name": "slint-nightly",/' "$marketplace"
