@@ -78,13 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           # Mirror the monorepo's ai-plugins/ onto this repo's root; README and
-          # .github are owned here and are preserved. Symlinks out of
-          # ai-plugins/ become copies.
-          rsync -a --copy-unsafe-links --delete \
+          # .github are owned here and are preserved. Resolve symlinks so the
+          # published plugin and standalone skill contain their referenced files.
+          rsync -aL --delete \
             --exclude='.git' --exclude='.github' --exclude='README.md' \
             "$RUNNER_TEMP/monorepo/ai-plugins/" ./
-          mkdir -p mcp/guidance
-          rsync -a --exclude='SKILL.md' skills/slint/ mcp/guidance/
           printf '{ "channel": "snapshot" }\n' > mcp/slint-preview/channel.json
           for marketplace in .claude-plugin/marketplace.json .cursor-plugin/marketplace.json; do
             sed -i 's/^  "name": "slint",$/  "name": "slint-nightly",/' "$marketplace"
